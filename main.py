@@ -1,75 +1,143 @@
+import tkinter as tk
+import subprocess
+import sqlite3
+from tkinter import ttk
 import cv2
-import numpy as np  
+import numpy as np
+from PIL import Image, ImageTk
 
-cap = cv2.VideoCapture(0)
+root = tk.Tk()
 
-if not cap.isOpened():
-    print("The camera could not be opened.")
-    exit()
+root.title("Gerçek Zamanlı Nesne Tanıma")
+root.geometry("400x400")
 
-net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")
-classes = []
-with open("coco.names", "r") as f:
-    classes = [line.strip() for line in f.readlines()]
+label = tk.Label(root, text="Merhaba, Tkinter!", font=("Arial", 14))
+label.pack(pady=20)# İki buton ekleme
+def canli_kamera():
+    label.config(text="Canlı Kamera Açılıyor...")
+    subprocess.Popen(['python', 'canli_kamera.py'])
 
-layer_names = net.getLayerNames()
-output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+def veritabaninda_nesne_ara():
+    # Create a new window for search
+    search_window = tk.Toplevel(root)
+    search_window.title("Nesne Arama")
+    search_window.geometry("800x600")
 
-colors = np.random.uniform(0, 255, size=(len(classes), 3))
+    # Create main frame
+    main_frame = tk.Frame(search_window)
+    main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    # Create left frame for search and results
+    left_frame = tk.Frame(main_frame)
+    left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    img = frame
-    img = cv2.resize(img, None, fx=0.3, fy=0.3)
-    height, width, channels = img.shape
+    # Create search frame
+    search_frame = tk.Frame(left_frame)
+    search_frame.pack(pady=10)
 
-    # Detecting objects
-    blob = cv2.dnn.blobFromImage(img, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
-    net.setInput(blob)
-    outs = net.forward(output_layers)
+    # Search label and entry
+    tk.Label(search_frame, text="Nesne Adı:").pack(side=tk.LEFT, padx=5)
+    search_entry = tk.Entry(search_frame)
+    search_entry.pack(side=tk.LEFT, padx=5)
 
-    class_ids = []
-    confidences = []
-    boxes = []
-    for out in outs:
-        for detection in out:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            if confidence > 0.5:
-                # Object detected
-                center_x = int(detection[0] * width)
-                center_y = int(detection[1] * height)
-                w = int(detection[2] * width)
-                h = int(detection[3] * height)
+    # Create treeview for results
+    tree = ttk.Treeview(left_frame, columns=("ID", "Nesne Adı", "Kayıt Tarihi"), show="headings")
+    tree.heading("ID", text="ID")
+    tree.heading("Nesne Adı", text="Nesne Adı")
+    tree.heading("Kayıt Tarihi", text="Kayıt Tarihi")
+    tree.pack(pady=10, fill=tk.BOTH, expand=True)
 
-                # Rectangle coordinates
-                x = int(center_x - w / 2)
-                y = int(center_y - h / 2)
+    # Create right frame for image display
+    right_frame = tk.Frame(main_frame)
+    right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-                boxes.append([x, y, w, h])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
+    # Image label
+    image_label = tk.Label(right_frame)
+    image_label.pack(pady=10)
 
-    indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+    def show_image(event):
+        selected_item = tree.selection()
+        if not selected_item:
+            return
+            
+        item = tree.item(selected_item[0])
+        item_id = item['values'][0]  # Get ID from selected item
 
-    font = cv2.FONT_HERSHEY_PLAIN
-    for i in range(len(boxes)):
-        if i in indexes:
-            x, y, w, h = boxes[i]
-            label = str(classes[class_ids[i]])
-            color = colors[i]
-            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(img, label, (x, y + 30), font, 1, color, 2)
+        # Connect to database and get image
+        conn = sqlite3.connect('nesneler.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT nesne_resmi FROM nesneler WHERE id = ?", (item_id,))
+        img_binary = cursor.fetchone()[0]
+        conn.close()
 
-    cv2.imshow("Image", img)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        # Convert binary to image
+        nparr = np.frombuffer(img_binary, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
+        # Convert BGR to RGB
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        
+        # Convert to PIL Image
+        img = Image.fromarray(img)
+        
+        # Resize image to fit in the window
+        img = img.resize((300, 300), Image.Resampling.LANCZOS)
+        
+        # Convert to PhotoImage
+        photo = ImageTk.PhotoImage(img)
+        
+        # Update image label
+        image_label.configure(image=photo)
+        image_label.image = photo  # Keep a reference
 
-cap.release()
-cv2.destroyAllWindows()  
+    def search_objects():
+        # Clear previous results
+        for item in tree.get_children():
+            tree.delete(item)
+
+        # Get search term
+        search_term = search_entry.get().lower()
+
+        # Connect to database and search
+        conn = sqlite3.connect('nesneler.db')
+        cursor = conn.cursor()
+        
+        if search_term:
+            cursor.execute("SELECT id, nesne_adi, kayit_tarihi FROM nesneler WHERE LOWER(nesne_adi) LIKE ?", (f'%{search_term}%',))
+        else:
+            cursor.execute("SELECT id, nesne_adi, kayit_tarihi FROM nesneler")
+        
+        results = cursor.fetchall()
+        conn.close()
+
+        # Display results
+        for result in results:
+            tree.insert("", tk.END, values=result)
+
+    # Bind selection event
+    tree.bind('<<TreeviewSelect>>', show_image)
+
+    # Search button
+    search_button = tk.Button(search_frame, text="Ara", command=search_objects)
+    search_button.pack(side=tk.LEFT, padx=5)
+
+    # Initial search to show all objects
+    search_objects()
+
+button_canli_kamera = tk.Button(root, text="Canlı Kamera", command=canli_kamera)
+button_canli_kamera.pack(pady=10)
+
+button_veritabani = tk.Button(root, text="Veritabanında Nesne Ara", command=veritabaninda_nesne_ara)
+button_veritabani.pack(pady=10)
+
+
+# Buton ekleme
+def tiklandi():
+    label.config(text="Butona tıklandı!")
+
+button = tk.Button(root, text="Tıkla!", command=tiklandi)
+button.pack(pady=10)
+
+# Pencereyi çalıştır
+root.mainloop()
+
