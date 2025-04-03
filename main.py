@@ -5,6 +5,7 @@ from tkinter import ttk
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
+from tkinter import messagebox
 
 root = tk.Tk()
 
@@ -110,9 +111,12 @@ def veritabaninda_nesne_ara():
         results = cursor.fetchall()
         conn.close()
 
-        # Display results
-        for result in results:
-            tree.insert("", tk.END, values=result)
+        if search_term and not results:
+            messagebox.showwarning("Uyarı", f"'{search_term}' ile eşleşen nesne bulunamadı!")
+        else:
+            # Display results
+            for result in results:
+                tree.insert("", tk.END, values=result)
 
     # Bind selection event
     tree.bind('<<TreeviewSelect>>', show_image)
