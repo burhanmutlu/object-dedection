@@ -1,18 +1,31 @@
-import cv2
-import numpy as np  
-import sqlite3
-from datetime import datetime
-import os
+# Bu program gerçek zamanlı nesne tanıma işlemlerini gerçekleştirir
+# Seçilen nesneleri kamera görüntüsünde tespit eder ve veritabanına kaydeder
 
+# Gerekli kütüphanelerin içe aktarılması
+import cv2          # Görüntü işleme için OpenCV kütüphanesi
+import numpy as np  # Sayısal işlemler için numpy kütüphanesi
+import sqlite3      # Veritabanı işlemleri için sqlite3 kütüphanesi
+from datetime import datetime  # Tarih ve zaman işlemleri için datetime modülü
+import os          # Dosya sistemi işlemleri için os modülü
+import sys         # Sistem işlemleri için sys modülü
+
+# Tespit edilen nesneleri tutan küme
 detected_objects = set()
 
 def create_table():
+    """
+    Veritabanı tablosunu oluşturan fonksiyon
+    Eğer tablo yoksa yeni bir tablo oluşturur
+    """
+    # Veritabanı bağlantısı oluşturma
     conn = sqlite3.connect('nesneler.db')
     cursor = conn.cursor()
     
+    # Tablonun var olup olmadığını kontrol etme
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nesneler'")
     table_exists = cursor.fetchone() is not None
     
+    # Tablo yoksa oluşturma
     if not table_exists:
         cursor.execute('''
             CREATE TABLE nesneler (
@@ -22,135 +35,175 @@ def create_table():
                 nesne_resmi BLOB
             )
         ''')
-    conn.commit()
-    conn.close()
+    conn.commit()  # Değişiklikleri kaydetme
+    conn.close()  # Bağlantıyı kapatma
 
 def add_nesne(nesne_adi, nesne_resmi):
+    """
+    Tespit edilen nesneyi veritabanına ekleyen fonksiyon
+    Nesne adı, kayıt tarihi ve görüntüsünü veritabanına kaydeder
+    """
+    # Veritabanı bağlantısı oluşturma
     conn = sqlite3.connect('nesneler.db')
     cursor = conn.cursor()
     
+    # Şu anki zamanı alma
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    # Görüntüyü binary formata dönüştürme
     _, img_encoded = cv2.imencode('.jpg', nesne_resmi)
     img_binary = img_encoded.tobytes()
     
+    # Veritabanına kaydetme
     cursor.execute("INSERT INTO nesneler (nesne_adi, kayit_tarihi, nesne_resmi) VALUES (?, ?, ?)", 
                   (nesne_adi, current_time, img_binary))
-    conn.commit()
+    conn.commit()  # Değişiklikleri kaydetme
     print(f"Yeni nesne kaydedildi: {nesne_adi}")
     
-    conn.close()
+    conn.close()  # Bağlantıyı kapatma
 
 def display_saved_objects():
+    """
+    Kaydedilen nesneleri görüntüleyen fonksiyon
+    Veritabanındaki tüm nesneleri ve görüntülerini gösterir
+    """
+    # Veritabanı bağlantısı oluşturma
     conn = sqlite3.connect('nesneler.db')
     cursor = conn.cursor()
     cursor.execute("SELECT nesne_adi, kayit_tarihi, nesne_resmi FROM nesneler")
     rows = cursor.fetchall()
     
+    # Her kaydedilen nesneyi gösterme
     for row in rows:
         nesne_adi, kayit_tarihi, img_binary = row
+        # Binary görüntüyü numpy dizisine dönüştürme
         nparr = np.frombuffer(img_binary, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
+        # Görüntüyü gösterme
         cv2.imshow(f"{nesne_adi} - {kayit_tarihi}", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        cv2.waitKey(0)  # Tuş basılana kadar bekleme
+        cv2.destroyAllWindows()  # Tüm pencereleri kapatma
     
-    conn.close()
+    conn.close()  # Bağlantıyı kapatma
 
+# Veritabanı tablosunu oluşturma
 create_table()
 
-cap = cv2.VideoCapture(0)
+# Komut satırı argümanlarından seçili nesneleri alma
+selected_objects = set()  # Seçili nesneleri tutan küme
+if len(sys.argv) > 1:  # Eğer argüman varsa
+    selected_objects = set(sys.argv[1].split(','))  # Virgülle ayrılmış nesneleri küme olarak alma
 
+# Kamerayı başlatma
+cap = cv2.VideoCapture(0)  # Varsayılan kamerayı açma
+
+# Kamera açılamazsa hata verme
 if not cap.isOpened():
     print("Kamera açılırken hata oluştu.")
     exit()
 
-net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")
+# YOLO modelini yükleme
+net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")  # YOLO modelini yükleme
 
-classes = []
-with open("coco.names", "r") as f:
-    classes = [line.strip() for line in f.readlines()]
+# COCO sınıf isimlerini yükleme
+classes = []  # Sınıf isimlerini tutan liste
+with open("coco.names", "r") as f:  # coco.names dosyasını okuma
+    classes = [line.strip() for line in f.readlines()]  # Her satırı temizleyerek listeye ekleme
 
-layer_names = net.getLayerNames()
-output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+# YOLO katmanlarını alma
+layer_names = net.getLayerNames()  # Tüm katman isimlerini alma
+output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]  # Çıkış katmanlarını alma
 
-colors = np.random.uniform(0, 255, size=(len(classes), 3))
+# Her sınıf için rastgele renk oluşturma
+colors = np.random.uniform(0, 255, size=(len(classes), 3))  # Her sınıf için RGB renk değerleri
 
-frameCount = 0
+# Kare sayacı
+frameCount = 0  # İşlenen kare sayısı
 
+# Ana döngü
 while True:
-    ret, frame = cap.read()
-    if not ret:
+    # Kameradan kare alma
+    ret, frame = cap.read()  # Bir kare okuma
+    if not ret:  # Kare okunamazsa döngüyü sonlandır
         break
 
-    img = frame
-    img = cv2.resize(img, None, fx=0.4, fy=0.4)
-    height, width, channels = img.shape
+    # Görüntüyü yeniden boyutlandırma
+    img = frame  # Orijinal kareyi kopyalama
+    img = cv2.resize(img, None, fx=0.4, fy=0.4)  # Görüntüyü %40 oranında küçültme
+    height, width, channels = img.shape  # Görüntü boyutlarını alma
 
-    blob = cv2.dnn.blobFromImage(img, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
-    net.setInput(blob)
-    outs = net.forward(output_layers)
+    # Görüntüyü YOLO formatına dönüştürme
+    blob = cv2.dnn.blobFromImage(img, 0.00392, (416, 416), (0, 0, 0), True, crop=False)  # Görüntüyü blob formatına dönüştürme
+    net.setInput(blob)  # Blob'u modele girdi olarak verme
+    outs = net.forward(output_layers)  # İleri yayılım yapma
 
-    class_ids = []
-    confidences = []
-    boxes = []
-    for out in outs:
-        for detection in out:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            if confidence > 0.5:
-                center_x = int(detection[0] * width)
-                center_y = int(detection[1] * height)
-                w = int(detection[2] * width)
-                h = int(detection[3] * height)
+    # Tespit sonuçlarını tutacak listeler
+    class_ids = []  # Sınıf ID'lerini tutan liste
+    confidences = []  # Güven değerlerini tutan liste
+    boxes = []  # Kutu koordinatlarını tutan liste
 
-                x = int(center_x - w / 2)
-                y = int(center_y - h / 2)
+    # Tespitleri işleme
+    for out in outs:  # Her çıkış katmanı için
+        for detection in out:  # Her tespit için
+            scores = detection[5:]  # Sınıf skorlarını alma
+            class_id = np.argmax(scores)  # En yüksek skora sahip sınıfın ID'sini alma
+            confidence = scores[class_id]  # Güven değerini alma
+            if confidence > 0.5:  # Güven değeri 0.5'ten büyükse
+                # Sadece seçili nesneleri işleme
+                if not selected_objects or classes[class_id] in selected_objects:
+                    # Nesne konumunu hesaplama
+                    center_x = int(detection[0] * width)  # Merkez x koordinatı
+                    center_y = int(detection[1] * height)  # Merkez y koordinatı
+                    w = int(detection[2] * width)  # Genişlik
+                    h = int(detection[3] * height)  # Yükseklik
 
-                boxes.append([x, y, w, h])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
+                    x = int(center_x - w / 2)  # Sol üst köşe x koordinatı
+                    y = int(center_y - h / 2)  # Sol üst köşe y koordinatı
 
-    indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+                    boxes.append([x, y, w, h])  # Kutu koordinatlarını listeye ekleme
+                    confidences.append(float(confidence))  # Güven değerini listeye ekleme
+                    class_ids.append(class_id)  # Sınıf ID'sini listeye ekleme
 
-    font = cv2.FONT_HERSHEY_PLAIN
-    if len(indexes) == 0:
-        text = "Nesne bulunamadı"
-        text_size = cv2.getTextSize(text, font, 2, 2)[0]
-        text_x = (img.shape[1] - text_size[0]) // 2
-        text_y = (img.shape[0] + text_size[1]) // 2
-        cv2.putText(img, text, (text_x, text_y), font, 2, (0, 0, 255), 2)
-    else:
-        for i in range(len(boxes)):
-            if i in indexes:
-                x, y, w, h = boxes[i]
-                label = str(classes[class_ids[i]])
-                color = colors[i]
-                cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
-                cv2.putText(img, label, (x, y + 30), font, 1, color, 2)
-                
-                original_x = int(x / 0.4)
-                original_y = int(y / 0.4)
-                original_w = int(w / 0.4)
-                original_h = int(h / 0.4)
-                
-                padding = 20
-                original_x = max(0, original_x - padding)
-                original_y = max(0, original_y - padding)
-                original_w = min(frame.shape[1] - original_x, original_w + 2*padding)
-                original_h = min(frame.shape[0] - original_y, original_h + 2*padding)
-                
-                nesne_resmi = frame[original_y:original_y+original_h, original_x:original_x+original_w]
-                add_nesne(label, nesne_resmi)
+    # Çakışan kutuları filtreleme
+    indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)  # Çakışan kutuları eleme
 
-    cv2.imshow("Image", img)
+    # Tespit edilen nesneleri çizme
+    font = cv2.FONT_HERSHEY_PLAIN  # Yazı tipi
+    for i in range(len(boxes)):  # Her kutu için
+        if i in indexes:  # Eğer kutu filtrelemeden geçtiyse
+            x, y, w, h = boxes[i]  # Kutu koordinatlarını alma
+            label = str(classes[class_ids[i]])  # Nesne adını alma
+            color = colors[class_ids[i]]  # Nesne rengini alma
+            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)  # Kutuyu çizme
+            cv2.putText(img, label, (x, y + 30), font, 1, color, 2)  # Nesne adını yazma
+            
+            # Orijinal görüntü boyutlarına göre koordinatları ayarlama
+            original_x = int(x / 0.4)  # Orijinal x koordinatı
+            original_y = int(y / 0.4)  # Orijinal y koordinatı
+            original_w = int(w / 0.4)  # Orijinal genişlik
+            original_h = int(h / 0.4)  # Orijinal yükseklik
+            
+            # Kenar boşluğu ekleme
+            padding = 20  # Kenar boşluğu miktarı
+            original_x = max(0, original_x - padding)  # Sol kenar boşluğu
+            original_y = max(0, original_y - padding)  # Üst kenar boşluğu
+            original_w = min(frame.shape[1] - original_x, original_w + 2*padding)  # Sağ kenar boşluğu
+            original_h = min(frame.shape[0] - original_y, original_h + 2*padding)  # Alt kenar boşluğu
+            
+            # Nesne görüntüsünü kesme ve kaydetme
+            nesne_resmi = frame[original_y:original_y+original_h, original_x:original_x+original_w]  # Nesneyi kesme
+            add_nesne(label, nesne_resmi)  # Veritabanına kaydetme
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    # Görüntüyü gösterme
+    cv2.imshow("Image", img)  # İşlenmiş görüntüyü gösterme
+
+    # Tuş kontrolleri
+    if cv2.waitKey(1) & 0xFF == ord('q'):  # q tuşu ile çıkış
         break
-    elif cv2.waitKey(1) & 0xFF == ord('v'):
+    elif cv2.waitKey(1) & 0xFF == ord('v'):  # v tuşu ile kaydedilen nesneleri görüntüleme
         display_saved_objects()
 
-cap.release()
-cv2.destroyAllWindows()
+# Kaynakları serbest bırakma
+cap.release()  # Kamerayı kapatma
+cv2.destroyAllWindows()  # Tüm pencereleri kapatma

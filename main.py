@@ -1,88 +1,281 @@
-import tkinter as tk
-import subprocess
-import sqlite3
-from tkinter import ttk
-import cv2
-import numpy as np
-from PIL import Image, ImageTk
-from tkinter import messagebox
+# Bu program gerçek zamanlı nesne tanıma sistemi için ana arayüzü oluşturur
+# Kullanıcıların nesneleri seçmesine ve kamera görüntüsünde tespit edilmesine olanak sağlar
+
+# Gerekli kütüphanelerin içe aktarılması
+import tkinter as tk  # GUI oluşturmak için tkinter kütüphanesi
+import subprocess    # Alt işlemleri başlatmak için subprocess kütüphanesi
+import sqlite3      # Veritabanı işlemleri için sqlite3 kütüphanesi
+from tkinter import ttk  # Tkinter'ın modern widget'ları için ttk modülü
+import cv2          # Görüntü işleme için OpenCV kütüphanesi
+import numpy as np  # Sayısal işlemler için numpy kütüphanesi
+from PIL import Image, ImageTk  # Görüntü işleme için PIL kütüphanesi
+from tkinter import messagebox  # Mesaj kutuları için messagebox modülü
 
 class NesneTanimaApp:
+    """
+    Nesne tanıma uygulamasının ana sınıfı
+    Bu sınıf, kullanıcı arayüzünü ve nesne seçim işlemlerini yönetir
+    """
     def __init__(self, root):
-        self.root = root
-        self.root.title("Gerçek Zamanlı Nesne Tanıma Sistemi")
-        self.root.geometry("800x600")
-        self.root.minsize(800, 600)
-        self.root.configure(bg="#f0f0f0")
-        self.search_window = None
+        """
+        Uygulama başlatıldığında çalışan başlangıç fonksiyonu
+        Ana pencere ayarlarını ve gerekli değişkenleri başlatır
+        """
+        # Ana pencere ayarları
+        self.root = root  # Ana pencere referansı
+        self.root.title("Gerçek Zamanlı Nesne Tanıma Sistemi")  # Pencere başlığı
+        self.root.geometry("1000x800")  # Pencere boyutu (genişlik x yükseklik)
+        self.root.minsize(1000, 800)    # Minimum pencere boyutu (küçültülemez)
+        self.root.configure(bg="#f0f0f0")  # Arka plan rengi (açık gri)
+        self.search_window = None  # Arama penceresi referansı (başlangıçta boş)
+        self.selected_objects = set()  # Seçili nesneleri tutan küme (başlangıçta boş)
 
+        # COCO nesnelerinin Türkçe çevirileri
+        # Her İngilizce nesne adı için Türkçe karşılığı tanımlanır
+        self.turkish_translations = {
+            'person': 'kişi',
+            'bicycle': 'bisiklet',
+            'car': 'araba',
+            'motorbike': 'motosiklet',
+            'aeroplane': 'uçak',
+            'bus': 'otobüs',
+            'train': 'tren',
+            'truck': 'kamyon',
+            'boat': 'tekne',
+            'traffic light': 'trafik ışığı',
+            'fire hydrant': 'yangın musluğu',
+            'stop sign': 'dur işareti',
+            'parking meter': 'parkmetre',
+            'bench': 'bank',
+            'bird': 'kuş',
+            'cat': 'kedi',
+            'dog': 'köpek',
+            'horse': 'at',
+            'sheep': 'koyun',
+            'cow': 'inek',
+            'elephant': 'fil',
+            'bear': 'ayı',
+            'zebra': 'zebra',
+            'giraffe': 'zürafa',
+            'backpack': 'sırt çantası',
+            'umbrella': 'şemsiye',
+            'handbag': 'el çantası',
+            'tie': 'kravat',
+            'suitcase': 'bavul',
+            'frisbee': 'frizbi',
+            'skis': 'kayak',
+            'snowboard': 'snowboard',
+            'sports ball': 'spor topu',
+            'kite': 'uçurtma',
+            'baseball bat': 'beyzbol sopası',
+            'baseball glove': 'beyzbol eldiveni',
+            'skateboard': 'kaykay',
+            'surfboard': 'sörf tahtası',
+            'tennis racket': 'tenis raketi',
+            'bottle': 'şişe',
+            'wine glass': 'şarap bardağı',
+            'cup': 'fincan',
+            'fork': 'çatal',
+            'knife': 'bıçak',
+            'spoon': 'kaşık',
+            'bowl': 'kase',
+            'banana': 'muz',
+            'apple': 'elma',
+            'sandwich': 'sandviç',
+            'orange': 'portakal',
+            'broccoli': 'brokoli',
+            'carrot': 'havuç',
+            'hot dog': 'hot dog',
+            'pizza': 'pizza',
+            'donut': 'donut',
+            'cake': 'pasta',
+            'chair': 'sandalye',
+            'sofa': 'kanepe',
+            'pottedplant': 'saksı bitkisi',
+            'bed': 'yatak',
+            'diningtable': 'yemek masası',
+            'toilet': 'tuvalet',
+            'tvmonitor': 'tv monitör',
+            'laptop': 'dizüstü bilgisayar',
+            'mouse': 'fare',
+            'remote': 'kumanda',
+            'keyboard': 'klavye',
+            'cell phone': 'cep telefonu',
+            'microwave': 'mikrodalga',
+            'oven': 'fırın',
+            'toaster': 'tost makinesi',
+            'sink': 'lavabo',
+            'refrigerator': 'buzdolabı',
+            'book': 'kitap',
+            'clock': 'saat',
+            'vase': 'vazo',
+            'scissors': 'makas',
+            'teddy bear': 'oyuncak ayı',
+            'hair drier': 'saç kurutma makinesi',
+            'toothbrush': 'diş fırçası'
+        }
+
+        # COCO nesnelerinin yüklenmesi
+        # coco.names dosyasından nesne isimleri okunur
+        with open('coco.names', 'r') as f:
+            self.coco_names = [line.strip() for line in f.readlines()]
+
+        # Tkinter stil ayarları
+        # Uygulamanın görsel temasını oluşturan stil tanımlamaları
         self.style = ttk.Style()
+        # Buton stili
         self.style.configure("TButton", 
-                           padding=10, 
-                           font=("Helvetica", 12),
-                           background="#4CAF50",
-                           foreground="white")
+                           padding=10,  # İç boşluk
+                           font=("Helvetica", 12),  # Yazı tipi ve boyutu
+                           background="#4CAF50",  # Arka plan rengi (yeşil)
+                           foreground="white")  # Yazı rengi (beyaz)
+        # Etiket stili
         self.style.configure("TLabel", 
-                           font=("Helvetica", 12),
-                           background="#f0f0f0")
+                           font=("Helvetica", 12),  # Yazı tipi ve boyutu
+                           background="#f0f0f0")  # Arka plan rengi
+        # Ağaç görünümü stili
         self.style.configure("Treeview",
-                           font=("Helvetica", 11),
-                           background="white",
-                           fieldbackground="white")
+                           font=("Helvetica", 11),  # Yazı tipi ve boyutu
+                           background="white",  # Arka plan rengi
+                           fieldbackground="white")  # Alan arka plan rengi
+        # Ağaç başlık stili
         self.style.configure("Treeview.Heading",
-                           font=("Helvetica", 12, "bold"),
-                           background="#4CAF50",
-                           foreground="white")
+                           font=("Helvetica", 12, "bold"),  # Kalın yazı tipi
+                           background="#4CAF50",  # Arka plan rengi
+                           foreground="white")  # Yazı rengi
 
-        self.create_widgets()
+        self.create_widgets()  # Arayüz elemanlarını oluştur
 
     def create_widgets(self):
+        """
+        Arayüz elemanlarını oluşturan fonksiyon
+        Tüm butonlar, etiketler ve nesne listesi burada oluşturulur
+        """
+        # Ana frame oluşturma (tüm içeriği kapsayan ana konteyner)
         self.main_frame = tk.Frame(self.root, bg="#f0f0f0")
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
+        # Başlık etiketi
         self.title_label = tk.Label(
             self.main_frame,
             text="NESNE TANIMA SİSTEMİ",
-            font=("Helvetica", 24, "bold"),
-            bg="#f0f0f0",
-            fg="#333333"
+            font=("Helvetica", 24, "bold"),  # Büyük ve kalın yazı tipi
+            bg="#f0f0f0",  # Arka plan rengi
+            fg="#333333"   # Yazı rengi (koyu gri)
         )
-        self.title_label.pack(pady=(0, 30))
+        self.title_label.pack(pady=(0, 30))  # Üstten 30 piksel boşluk
 
-        self.button_frame = tk.Frame(self.main_frame, bg="#f0f0f0")
-        self.button_frame.pack(fill=tk.X, padx=50, pady=20)
+        # İçerik frame'i oluşturma (sol ve sağ bölümleri içeren konteyner)
+        content_frame = tk.Frame(self.main_frame, bg="#f0f0f0")
+        content_frame.pack(fill=tk.BOTH, expand=True)
 
+        # Sol frame (nesne listesi için)
+        left_frame = tk.Frame(content_frame, bg="#f0f0f0")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 20))
+
+        # Kaydırma çubuğu ve canvas oluşturma
+        # Uzun nesne listesi için kaydırılabilir alan
+        canvas = tk.Canvas(left_frame, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=canvas.yview)
+        self.list_frame = tk.Frame(canvas, bg="#f0f0f0")
+
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Kaydırma çubuğu ve canvas'ı yerleştirme
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)  # Sağ tarafa dikey kaydırma çubuğu
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)  # Sol tarafa canvas
+
+        # Canvas içinde liste frame'i oluşturma
+        canvas.create_window((0, 0), window=self.list_frame, anchor="nw")
+
+        # Her satırda 5 nesne olacak şekilde checkbox'ları oluşturma
+        self.object_vars = {}  # Checkbox değişkenlerini tutan sözlük
+        items_per_row = 5  # Her satırdaki nesne sayısı
+        for i, obj in enumerate(self.coco_names):
+            row = i // items_per_row  # Satır numarası hesaplama (tam bölme)
+            col = i % items_per_row   # Sütun numarası hesaplama (kalan)
+            
+            var = tk.BooleanVar()  # Checkbox değişkeni (seçili/seçili değil)
+            self.object_vars[obj] = var  # Değişkeni sözlüğe ekleme
+            
+            # Her checkbox için frame oluşturma
+            checkbox_frame = tk.Frame(self.list_frame, bg="#f0f0f0")
+            checkbox_frame.grid(row=row, column=col, padx=5, pady=5, sticky="w")
+            
+            # Türkçe ismi alma (çeviri sözlüğünden)
+            turkish_name = self.turkish_translations.get(obj, obj)
+            
+            # Checkbox oluşturma
+            cb = tk.Checkbutton(
+                checkbox_frame,
+                text=turkish_name,  # Türkçe nesne adı
+                variable=var,  # Checkbox değişkeni
+                bg="#f0f0f0",  # Arka plan rengi
+                font=("Helvetica", 10),  # Yazı tipi ve boyutu
+                command=self.update_selected_objects  # Seçim değiştiğinde çalışacak fonksiyon
+            )
+            cb.pack(anchor="w")  # Sola hizalı yerleştirme
+
+        # Canvas kaydırma ayarları
+        # Liste boyutu değiştiğinde kaydırma alanını güncelle
+        self.list_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        # Canvas boyutu değiştiğinde içerik genişliğini güncelle
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas.find_all()[0], width=e.width))
+
+        # Sağ frame (butonlar için)
+        right_frame = tk.Frame(content_frame, bg="#f0f0f0")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(20, 0))
+
+        # Kamera başlatma butonu
         self.camera_button = tk.Button(
-            self.button_frame,
+            right_frame,
             text="Canlı Kamera Başlat",
-            command=self.canli_kamera,
-            font=("Helvetica", 12),
-            bg="#4CAF50",
-            fg="white",
-            padx=20,
-            pady=10,
-            relief=tk.FLAT,
-            cursor="hand2"
+            command=self.canli_kamera,  # Tıklandığında çalışacak fonksiyon
+            font=("Helvetica", 12),  # Yazı tipi ve boyutu
+            bg="#4CAF50",  # Arka plan rengi (yeşil)
+            fg="white",  # Yazı rengi (beyaz)
+            padx=20,  # Yatay iç boşluk
+            pady=10,  # Dikey iç boşluk
+            relief=tk.FLAT,  # Düz görünüm
+            cursor="hand2"  # El işaretçisi
         )
-        self.camera_button.pack(fill=tk.X, pady=10)
+        self.camera_button.pack(fill=tk.X, pady=10)  # Yatay doldurma ve dikey boşluk
 
+        # Kaydedilen nesneler butonu
         self.search_button = tk.Button(
-            self.button_frame,
+            right_frame,
             text="Kaydedilen Nesneler",
-            command=self.veritabaninda_nesne_ara,
-            font=("Helvetica", 12),
-            bg="#2196F3",
-            fg="white",
-            padx=20,
-            pady=10,
-            relief=tk.FLAT,
-            cursor="hand2"
+            command=self.veritabaninda_nesne_ara,  # Tıklandığında çalışacak fonksiyon
+            font=("Helvetica", 12),  # Yazı tipi ve boyutu
+            bg="#2196F3",  # Arka plan rengi (mavi)
+            fg="white",  # Yazı rengi (beyaz)
+            padx=20,  # Yatay iç boşluk
+            pady=10,  # Dikey iç boşluk
+            relief=tk.FLAT,  # Düz görünüm
+            cursor="hand2"  # El işaretçisi
         )
-        self.search_button.pack(fill=tk.X, pady=10)
+        self.search_button.pack(fill=tk.X, pady=10)  # Yatay doldurma ve dikey boşluk
+
+    def update_selected_objects(self):
+        """
+        Seçili nesneleri güncelleyen fonksiyon
+        Checkbox'ların durumuna göre seçili nesneler listesini günceller
+        """
+        # Seçili nesneleri güncelleme (işaretli olanları seç)
+        self.selected_objects = {obj for obj, var in self.object_vars.items() if var.get()}
 
     def canli_kamera(self):
+        """
+        Kamera görüntüsünü başlatan fonksiyon
+        Seçili nesneleri kamera scriptine iletir
+        """
         try:
-            subprocess.Popen(['python', 'canli_kamera.py'])
+            # Seçili nesne kontrolü
+            if not self.selected_objects:
+                messagebox.showwarning("Uyarı", "Lütfen en az bir nesne seçin!")
+                return
+            # Kamera scriptini başlatma ve seçili nesneleri iletme
+            subprocess.Popen(['python', 'canli_kamera.py', ','.join(self.selected_objects)])
         except Exception as e:
             messagebox.showerror("Hata", "Kamera başlatılırken bir hata oluştu!")
 
