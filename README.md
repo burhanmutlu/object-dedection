@@ -16,7 +16,6 @@ Bu proje, YOLO (You Only Look Once) algoritması kullanarak gerçek zamanlı nes
 
 <div align="center">
   <img src="read/1.png" alt="Ana Arayüz" width="400"/>
-  <img src="read/2.png" alt="Nesne Tespiti" width="400"/>
   <img src="read/3.png" alt="Veritabanı Görünümü" width="400"/>
 </div>
 
@@ -164,10 +163,6 @@ Bir hata ile karşılaştığınızda:
 
 Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için `LICENSE` dosyasına bakın.
 
-## 👨‍💻 Geliştirici
-
-**Murat Abi** - [GitHub Profili](https://github.com/kullaniciadi)
-
 ## 🙏 Teşekkürler
 
 - [OpenCV](https://opencv.org/) - Görüntü işleme kütüphanesi
@@ -177,8 +172,8 @@ Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için `LICENSE` dosy
 ## 📞 İletişim
 
 Proje hakkında sorularınız için:
-- GitHub Issues: [Proje Issues](https://github.com/kullaniciadi/opencv-project/issues)
-- Email: ornek@email.com
+- GitHub Issues: [Proje Issues](https://github.com/burhanmutlu/opencv-project/issues)
+- Email: burhanmmutlu@gmail.com
 
 ---
 
